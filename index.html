@@ -4,18 +4,282 @@
 <head>
   <title>CEEYIT Chat</title>
   <style>
-    body { font-family: Arial, sans-serif; background: #eef; text-align: center; margin-top: 100px; }
-    h2 { color: #333; }
-    p { font-size: 18px; }
+    body { 
+      font-family: Arial, sans-serif; 
+      background: #f0f2f5; 
+      margin: 0;
+      padding: 0;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    .chat-header {
+      background: #4267B2;
+      color: white;
+      padding: 15px;
+      border-radius: 10px 10px 0 0;
+      display: flex;
+      justify-content: space-between;
+    }
+    .chat-container {
+      display: flex;
+      height: 70vh;
+      border: 1px solid #ddd;
+      border-radius: 0 0 10px 10px;
+    }
+    .users-panel {
+      width: 25%;
+      background: #f5f5f5;
+      border-right: 1px solid #ddd;
+      padding: 10px;
+      overflow-y: auto;
+    }
+    .chat-panel {
+      width: 75%;
+      display: flex;
+      flex-direction: column;
+    }
+    .messages {
+      flex-grow: 1;
+      padding: 15px;
+      overflow-y: auto;
+      background: white;
+    }
+    .message {
+      margin-bottom: 10px;
+      padding: 8px 15px;
+      border-radius: 18px;
+      max-width: 70%;
+      word-wrap: break-word;
+    }
+    .message.received {
+      background: #f1f0f0;
+      align-self: flex-start;
+    }
+    .message.sent {
+      background: #0084ff;
+      color: white;
+      align-self: flex-end;
+      margin-left: auto;
+    }
+    .message.system {
+      background: #f8f8f8;
+      color: #666;
+      font-style: italic;
+      text-align: center;
+      max-width: 100%;
+      margin: 5px auto;
+    }
+    .message-info {
+      font-size: 12px;
+      color: #777;
+      margin-top: 3px;
+    }
+    .input-area {
+      display: flex;
+      padding: 10px;
+      background: #f5f5f5;
+      border-top: 1px solid #ddd;
+      border-radius: 0 0 10px 10px;
+    }
+    #message-input {
+      flex-grow: 1;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 20px;
+      margin-right: 10px;
+    }
+    button {
+      background: #4267B2;
+      color: white;
+      border: none;
+      padding: 10px 15px;
+      border-radius: 20px;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #365899;
+    }
+    .typing-indicator {
+      font-style: italic;
+      color: #777;
+      height: 20px;
+      padding: 0 15px;
+    }
+    .user-item {
+      padding: 8px;
+      margin-bottom: 5px;
+      background: white;
+      border-radius: 5px;
+    }
+    .login-container {
+      max-width: 400px;
+      margin: 100px auto;
+      padding: 20px;
+      background: white;
+      border-radius: 10px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    .hidden {
+      display: none;
+    }
   </style>
 </head>
 <body>
-  <h2>CEEYIT Real-Time Chat App</h2>
-  <p>Status: <span id="status">Connecting...</span></p>
+  <!-- Login Screen -->
+  <div id="login-screen" class="login-container">
+    <h2>CEEYIT Real-Time Chat</h2>
+    <p>Enter your username to join the chat</p>
+    <div style="display: flex;">
+      <input type="text" id="username-input" placeholder="Username" style="flex-grow: 1; padding: 10px; margin-right: 10px; border-radius: 20px; border: 1px solid #ddd;">
+      <button id="join-btn">Join</button>
+    </div>
+  </div>
+
+  <!-- Chat Interface -->
+  <div id="chat-interface" class="hidden">
+    <div class="container">
+      <div class="chat-header">
+        <h2>CEEYIT Real-Time Chat</h2>
+        <div>Online: <span id="user-count">0</span></div>
+      </div>
+      <div class="chat-container">
+        <div class="users-panel">
+          <h3>Active Users</h3>
+          <div id="users-list"></div>
+        </div>
+        <div class="chat-panel">
+          <div id="messages" class="messages"></div>
+          <div id="typing-indicator" class="typing-indicator"></div>
+          <div class="input-area">
+            <input type="text" id="message-input" placeholder="Type a message...">
+            <button id="send-btn">Send</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="/socket.io/socket.io.js"></script>
   <script>
+    // DOM Elements
+    const loginScreen = document.getElementById('login-screen');
+    const chatInterface = document.getElementById('chat-interface');
+    const usernameInput = document.getElementById('username-input');
+    const joinBtn = document.getElementById('join-btn');
+    const messageInput = document.getElementById('message-input');
+    const sendBtn = document.getElementById('send-btn');
+    const messagesContainer = document.getElementById('messages');
+    const usersList = document.getElementById('users-list');
+    const userCount = document.getElementById('user-count');
+    const typingIndicator = document.getElementById('typing-indicator');
+    
+    // Connect to Socket.io
     const socket = io();
-    document.getElementById('status').textContent = 'Connected';
+    let username = '';
+    let typingTimeout;
+    
+    // Join chat event
+    joinBtn.addEventListener('click', () => {
+      username = usernameInput.value.trim();
+      if (username) {
+        loginScreen.classList.add('hidden');
+        chatInterface.classList.remove('hidden');
+        socket.emit('user_join', username);
+      }
+    });
+    
+    // Allow Enter key to submit username
+    usernameInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        joinBtn.click();
+      }
+    });
+    
+    // Send message event
+    sendBtn.addEventListener('click', sendMessage);
+    
+    // Allow Enter key to send message
+    messageInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        sendMessage();
+      }
+      
+      // Emit typing event
+      socket.emit('typing', true);
+      
+      // Clear previous timeout
+      clearTimeout(typingTimeout);
+      
+      // Set new timeout
+      typingTimeout = setTimeout(() => {
+        socket.emit('typing', false);
+      }, 1000);
+    });
+    
+    function sendMessage() {
+      const message = messageInput.value.trim();
+      if (message) {
+        socket.emit('send_message', message);
+        messageInput.value = '';
+        // Stop typing indicator
+        socket.emit('typing', false);
+      }
+    }
+    
+    // Handle incoming messages
+    socket.on('message', (message) => {
+      const messageElement = document.createElement('div');
+      
+      if (message.user === 'System') {
+        messageElement.className = 'message system';
+        messageElement.textContent = message.text;
+      } else {
+        messageElement.className = message.user === username ? 'message sent' : 'message received';
+        
+        const userSpan = document.createElement('strong');
+        userSpan.textContent = message.user + ': ';
+        
+        const messageText = document.createTextNode(message.text);
+        
+        const messageInfo = document.createElement('div');
+        messageInfo.className = 'message-info';
+        messageInfo.textContent = message.time;
+        
+        messageElement.appendChild(userSpan);
+        messageElement.appendChild(messageText);
+        messageElement.appendChild(messageInfo);
+      }
+      
+      messagesContainer.appendChild(messageElement);
+      
+      // Auto scroll to bottom
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    });
+    
+    // Update user list
+    socket.on('update_users', (users) => {
+      usersList.innerHTML = '';
+      userCount.textContent = users.length;
+      
+      users.forEach(user => {
+        const userElement = document.createElement('div');
+        userElement.className = 'user-item';
+        userElement.textContent = user;
+        usersList.appendChild(userElement);
+      });
+    });
+    
+    // Handle typing indicator
+    socket.on('user_typing', (data) => {
+      if (data.isTyping) {
+        typingIndicator.textContent = `${data.user} is typing...`;
+      } else {
+        typingIndicator.textContent = '';
+      }
+    });
   </script>
 </body>
 </html>
