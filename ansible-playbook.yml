@@ -128,8 +128,15 @@
       ignore_errors: yes
 
     # SELinux configuration if needed
+    - name: Check if SELinux is enabled
+      command: getenforce
+      register: selinux_status
+      changed_when: false
+      ignore_errors: yes
+      
     - name: Allow Nginx to connect to Node.js app (SELinux)
       shell: setsebool -P httpd_can_network_connect 1
+      when: selinux_status.stdout == "Enforcing" or selinux_status.stdout == "Permissive"
       ignore_errors: yes
 
     - name: Enable and start chat-app service
