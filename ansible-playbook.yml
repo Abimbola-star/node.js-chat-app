@@ -1,0 +1,165 @@
+---
+- name: Configure EC2 instance for Chat App
+  hosts: nodejs_servers
+  become: yes
+  vars:
+    app_dir: /home/ec2-user/chat-app
+    node_version: 16.x
+    app_port: 3000
+
+  tasks:
+    - name: Update yum cache
+      yum:
+        update_cache: yes
+
+    - name: Install EPEL repository for Amazon Linux 2
+      command: sudo amazon-linux-extras install epel -y
+      args:
+        creates: /etc/yum.repos.d/epel.repo
+        
+    - name: Install required packages
+      yum:
+        name:
+          - nginx
+          - git
+          - curl
+          - lsof
+        state: present
+        enablerepo: epel
+
+    - name: Add NodeSource repository
+      shell: |
+        curl -fsSL https://rpm.nodesource.com/setup_{{ node_version }} | bash -
+      args:
+        warn: false
+
+    - name: Install Node.js
+      yum:
+        name: nodejs
+        state: present
+
+    - name: Create application directory
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: ec2-user
+        group: ec2-user
+        mode: '0755'
+
+    # Option 1: If you have a tarball
+    - name: Extract application files (if using tarball)
+      unarchive:
+        src: /home/ec2-user/chat-app.tar.gz
+        dest: "{{ app_dir }}"
+        remote_src: yes
+      become_user: ec2-user
+      when: false  # Change to true if using tarball approach
+      
+    # Option 2: Copy individual files
+    - name: Copy application files
+      copy:
+        src: "{{ item }}"
+        dest: "{{ app_dir }}/"
+        owner: ec2-user
+        group: ec2-user
+      with_items:
+        - app.js
+        - package.json
+        - index.html
+      
+    - name: Install npm dependencies
+      npm:
+        path: "{{ app_dir }}"
+        state: present
+      become_user: ec2-user
+
+    - name: Create Nginx configuration
+      copy:
+        content: |
+          server {
+              listen 80;
+              server_name {{ ansible_host }};
+
+              location / {
+                  proxy_pass http://localhost:{{ app_port }};
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection 'upgrade';
+                  proxy_set_header Host $host;
+                  proxy_cache_bypass $http_upgrade;
+              }
+          }
+        dest: /etc/nginx/conf.d/chat-app.conf
+
+    - name: Create systemd service file
+      copy:
+        content: |
+          [Unit]
+          Description=Node.js Chat Application
+          After=network.target
+
+          [Service]
+          User=ec2-user
+          WorkingDirectory={{ app_dir }}
+          ExecStart=/usr/bin/node app.js
+          Restart=always
+          RestartSec=10
+          StandardOutput=syslog
+          StandardError=syslog
+          SyslogIdentifier=chat-app
+          Environment=PORT={{ app_port }}
+
+          [Install]
+          WantedBy=multi-user.target
+        dest: /etc/systemd/system/chat-app.service
+
+    - name: Reload systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: Stop chat-app service if running
+      systemd:
+        name: chat-app
+        state: stopped
+      ignore_errors: yes
+      
+    - name: Kill any processes using port {{ app_port }}
+      shell: lsof -ti:{{ app_port }} | xargs -r kill -9
+      ignore_errors: yes
+
+    # SELinux configuration if needed
+    - name: Allow Nginx to connect to Node.js app (SELinux)
+      shell: setsebool -P httpd_can_network_connect 1
+      ignore_errors: yes
+
+    - name: Enable and start chat-app service
+      systemd:
+        name: chat-app
+        state: started
+        enabled: yes
+
+    - name: Enable and restart Nginx
+      systemd:
+        name: nginx
+        state: restarted
+        enabled: yes
+        
+    - name: Check chat-app service status
+      command: systemctl status chat-app
+      register: chat_app_status
+      changed_when: false
+      ignore_errors: yes
+      
+    - name: Display chat-app service status
+      debug:
+        var: chat_app_status.stdout_lines
+        
+    - name: Check nginx service status
+      command: systemctl status nginx
+      register: nginx_status
+      changed_when: false
+      ignore_errors: yes
+      
+    - name: Display nginx service status
+      debug:
+        var: nginx_status.stdout_lines
