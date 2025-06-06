@@ -73,6 +73,13 @@
         state: present
       become_user: ec2-user
 
+    - name: Install prom client
+      npm:
+        name: prom-client
+        global: yes
+        state: present
+      become_user: ec2-user
+
     - name: Create Nginx configuration
       copy:
         content: |
