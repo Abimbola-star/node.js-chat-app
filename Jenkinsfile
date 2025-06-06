@@ -23,7 +23,7 @@ pipeline {
         stage('Deploy App') {
              steps {
                 sshagent(['ssh-key']) {
-                    sh 'ansible-playbook ansible-playbook.yml -i hosts.ini'
+                    sh 'ansible-playbook ansible-playbook.yml -i hosts.ini --ssh-common-args="-o StrictHostKeyChecking=no" -e "ansible_ssh_user=ec2-user" -e "ansible_become_password=" --timeout=30'
                 }
             }
         }
@@ -31,6 +31,9 @@ pipeline {
         stage('Deploy Monitoring') {
             steps {
                 sh '''
+                    # Get absolute workspace path
+                    WORKSPACE_PATH=$(pwd)
+                    
                     # Create persistent directories for Prometheus in workspace
                     mkdir -p ${WORKSPACE}/prometheus/config
                     
@@ -98,13 +101,15 @@ EOF
                 '''
                 
                 sh '''
-                    # Create startup script in workspace
+                    # Create startup script in workspace with absolute paths
+                    WORKSPACE_PATH=$(pwd)
+                    
                     cat > ${WORKSPACE}/docker-monitoring-startup.sh << EOF
 #!/bin/bash
 # Start Prometheus
 docker start prometheus || docker run -d --name prometheus \\
   -p 9090:9090 \\
-  -v ${WORKSPACE}/prometheus/config:/etc/prometheus \\
+  -v ${WORKSPACE_PATH}/prometheus/config:/etc/prometheus \\
   --restart always \\
   prom/prometheus
 
@@ -112,8 +117,8 @@ docker start prometheus || docker run -d --name prometheus \\
 docker start grafana || docker run -d --name grafana \\
   -p 3000:3000 \\
   --link prometheus:prometheus \\
-  -v ${WORKSPACE}/grafana/provisioning:/etc/grafana/provisioning \\
-  -v ${WORKSPACE}/grafana/data:/var/lib/grafana \\
+  -v ${WORKSPACE_PATH}/grafana/provisioning:/etc/grafana/provisioning \\
+  -v ${WORKSPACE_PATH}/grafana/data:/var/lib/grafana \\
   -e "GF_SECURITY_ADMIN_PASSWORD=admin" \\
   -e "GF_USERS_ALLOW_SIGN_UP=false" \\
   --restart always \\
@@ -145,6 +150,12 @@ EOF
                     echo "Chat App: http://${CHAT_APP_IP}:3000"
                     echo "Prometheus: http://$(hostname -I | awk '{print $1}'):9090"
                     echo "Grafana: http://$(hostname -I | awk '{print $1}'):3000 (admin/admin)"
+                    
+                    echo ""
+                    echo "To ensure monitoring services start after reboot, run:"
+                    echo "sudo su - jenkins"
+                    echo "crontab -e"
+                    echo "Add: @reboot /bin/bash $(pwd)/docker-monitoring-startup.sh"
                 '''
             }
         }
