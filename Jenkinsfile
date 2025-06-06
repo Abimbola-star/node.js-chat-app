@@ -8,7 +8,7 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                checkout scm
+               git branch: 'dev', url: 'https://github.com/Abimbola-star/node.js-chat-app.git'
             }
         }
         
