@@ -27,7 +27,6 @@ pipeline {
                 }
             }
         }
-    }
         
         stage('Deploy Monitoring') {
             steps {
@@ -134,3 +133,4 @@ EOF
             ])
         }
     }
+}
