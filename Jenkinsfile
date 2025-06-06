@@ -21,7 +21,7 @@ pipeline {
         
         stage('Deploy App') {
             when {
-                branch 'main'
+                branch 'dev'
             }
             steps {
                 withCredentials([sshUserPrivateKey(credentialsId: 'ssh-key', keyFileVariable: 'SSH_KEY')]) {
@@ -35,7 +35,7 @@ pipeline {
         
         stage('Deploy Monitoring') {
             when {
-                branch 'main'
+                branch 'dev'
             }
             steps {
                 sh '''
@@ -107,7 +107,7 @@ EOF
         
         stage('Verify Deployment') {
             when {
-                branch 'main'
+                branch 'dev'
             }
             steps {
                 sh '''
