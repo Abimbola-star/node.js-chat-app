@@ -3,6 +3,7 @@ pipeline {
     
     environment {
         CHAT_APP_IP = credentials('chat-app-ip')
+        SSH_KEY     = credentials('ssh-key')
     }
     
     stages {
@@ -20,15 +21,13 @@ pipeline {
         }
         
         stage('Deploy App') {
-            steps {
-                withCredentials([sshUserPrivateKey(credentialsId: 'ssh-key', keyFileVariable: 'SSH_KEY')]) {
-                    sh '''
-                        export ANSIBLE_HOST_KEY_CHECKING=False
-                        ansible-playbook -i hosts.ini ansible-playbook.yml --private-key=$SSH_KEY
-                    '''
+             steps {
+                sshagent(['ssh-key']) {
+                    sh 'ansible-playbook ansible-playbook.yml -i hosts.ini'
                 }
             }
         }
+    }
         
         stage('Deploy Monitoring') {
             steps {
