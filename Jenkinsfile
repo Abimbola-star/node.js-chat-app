@@ -20,9 +20,6 @@ pipeline {
         }
         
         stage('Deploy App') {
-            when {
-                branch 'dev'
-            }
             steps {
                 withCredentials([sshUserPrivateKey(credentialsId: 'ssh-key', keyFileVariable: 'SSH_KEY')]) {
                     sh '''
@@ -34,9 +31,6 @@ pipeline {
         }
         
         stage('Deploy Monitoring') {
-            when {
-                branch 'dev'
-            }
             steps {
                 sh '''
                     # Create directories for Prometheus
@@ -106,9 +100,6 @@ EOF
         }
         
         stage('Verify Deployment') {
-            when {
-                branch 'dev'
-            }
             steps {
                 sh '''
                     echo "Checking Chat App..."
