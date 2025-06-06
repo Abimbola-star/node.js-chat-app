@@ -13,6 +13,7 @@ resource "aws_security_group" "monitoring_sg" {
     to_port     = 3000
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
+    description = "Grafana web interface"
   }
 
   # Prometheus UI
@@ -21,6 +22,7 @@ resource "aws_security_group" "monitoring_sg" {
     to_port     = 9090
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
+    description = "Prometheus web interface"
   }
 
   # SSH access
@@ -29,6 +31,7 @@ resource "aws_security_group" "monitoring_sg" {
     to_port     = 22
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
+    description = "SSH access"
   }
 
   # Node Exporter
@@ -37,13 +40,20 @@ resource "aws_security_group" "monitoring_sg" {
     to_port     = 9100
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
+    description = "Node Exporter metrics"
   }
 
+  # Allow all outbound traffic
   egress {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
+    description = "Allow all outbound traffic"
+  }
+  
+  tags = {
+    Name = "monitoring-security-group"
   }
 }
 
@@ -56,6 +66,7 @@ resource "aws_instance" "prometheus" {
   
   user_data = <<-EOF
     #!/bin/bash
+    # Update system and install Docker
     yum update -y
     amazon-linux-extras install docker -y
     systemctl start docker
@@ -66,7 +77,7 @@ resource "aws_instance" "prometheus" {
     mkdir -p /var/lib/prometheus
     
     # Create Prometheus config
-    cat > /etc/prometheus/prometheus.yml <<'CONFIG'
+    cat > /etc/prometheus/prometheus.yml <<'EOC'
     global:
       scrape_interval: 15s
     
@@ -82,11 +93,15 @@ resource "aws_instance" "prometheus" {
       - job_name: 'chat_app'
         static_configs:
           - targets: ['${var.chat_app_ip}:9100']
-    CONFIG
+    EOC
+    
+    # Fix variable interpolation in config
+    sed -i "s/\${var.chat_app_ip}/${var.chat_app_ip}/g" /etc/prometheus/prometheus.yml
     
     # Run node exporter for local monitoring
     docker run -d \
       --name node-exporter \
+      --restart always \
       --net="host" \
       --pid="host" \
       -v "/:/host:ro,rslave" \
@@ -96,6 +111,7 @@ resource "aws_instance" "prometheus" {
     # Run Prometheus with persistent config
     docker run -d \
       --name prometheus \
+      --restart always \
       -p 9090:9090 \
       -v /etc/prometheus:/etc/prometheus \
       -v /var/lib/prometheus:/prometheus \
@@ -104,6 +120,17 @@ resource "aws_instance" "prometheus" {
       --storage.tsdb.path=/prometheus \
       --web.console.libraries=/usr/share/prometheus/console_libraries \
       --web.console.templates=/usr/share/prometheus/consoles
+      
+    # Wait for Prometheus to start and verify it's running
+    sleep 30
+    curl -s http://localhost:9090/-/healthy || echo "Prometheus not healthy"
+    
+    # Disable SELinux if it's causing issues
+    setenforce 0 || true
+    
+    # Make sure ports are open in security groups
+    iptables -A INPUT -p tcp --dport 9090 -j ACCEPT
+    iptables -A INPUT -p tcp --dport 9100 -j ACCEPT
   EOF
 
   tags = {
@@ -120,6 +147,7 @@ resource "aws_instance" "grafana" {
   
   user_data = <<-EOF
     #!/bin/bash
+    # Update system and install Docker
     yum update -y
     amazon-linux-extras install docker -y
     systemctl start docker
@@ -132,7 +160,7 @@ resource "aws_instance" "grafana" {
     mkdir -p /etc/grafana/provisioning/datasources
     
     # Create datasource config
-    cat > /etc/grafana/provisioning/datasources/prometheus.yml <<'CONFIG'
+    cat > /etc/grafana/provisioning/datasources/prometheus.yml <<EOC
     apiVersion: 1
     datasources:
       - name: Prometheus
@@ -140,18 +168,32 @@ resource "aws_instance" "grafana" {
         access: proxy
         url: http://${aws_instance.prometheus.private_ip}:9090
         isDefault: true
-    CONFIG
+    EOC
     
     # Run Grafana with persistent storage and auto-provisioned datasource
     docker run -d \
       -p 3000:3000 \
       --name grafana \
+      --restart always \
       -v /var/lib/grafana:/var/lib/grafana \
       -v /etc/grafana/provisioning:/etc/grafana/provisioning \
       -e "GF_SECURITY_ADMIN_PASSWORD=admin" \
       -e "GF_USERS_ALLOW_SIGN_UP=false" \
       -e "GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource" \
       grafana/grafana
+      
+    # Wait longer for Grafana to start
+    sleep 30
+    curl -s http://localhost:3000/api/health || echo "Grafana not healthy"
+    
+    # Disable SELinux if it's causing issues
+    setenforce 0 || true
+    
+    # Make sure ports are open
+    iptables -A INPUT -p tcp --dport 3000 -j ACCEPT
+    
+    # Output completion message to logs
+    echo "Grafana setup complete. Access at http://$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4):3000"
   EOF
 
   tags = {

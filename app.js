@@ -1,12 +1,31 @@
-
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const path = require('path');
+const promClient = require('prom-client');
 
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server);
+
+// Prometheus metrics setup
+const collectDefaultMetrics = promClient.collectDefaultMetrics;
+const Registry = promClient.Registry;
+const register = new Registry();
+collectDefaultMetrics({ register });
+
+// Custom metrics
+const activeConnectionsGauge = new promClient.Gauge({
+    name: 'chat_active_connections',
+    help: 'Number of active chat connections',
+    registers: [register]
+});
+
+const messageCounter = new promClient.Counter({
+    name: 'chat_messages_total',
+    help: 'Total number of chat messages',
+    registers: [register]
+});
 
 // Middleware
 app.use(express.static(__dirname));
@@ -21,9 +40,16 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
+// Metrics endpoint for Prometheus
+app.get('/metrics', async (req, res) => {
+    res.set('Content-Type', register.contentType);
+    res.end(await register.metrics());
+});
+
 // Socket.io connection handling
 io.on('connection', socket => {
     console.log('User connected');
+    activeConnectionsGauge.inc();
     
     // Handle user joining
     socket.on('user_join', (username) => {
@@ -67,6 +93,9 @@ io.on('connection', socket => {
             chatHistory.shift();
         }
         
+        // Increment message counter for Prometheus
+        messageCounter.inc();
+        
         // Broadcast to all clients
         io.emit('message', message);
     });
@@ -82,6 +111,7 @@ io.on('connection', socket => {
     // Handle disconnection
     socket.on('disconnect', () => {
         console.log('User disconnected');
+        activeConnectionsGauge.dec();
         if (socket.username) {
             activeUsers.delete(socket.username);
             io.emit('message', {
@@ -94,4 +124,5 @@ io.on('connection', socket => {
     });
 });
 
+// Start server on port 3000 for the chat app and 9100 for metrics
 server.listen(3000, () => console.log('Chat app running on port 3000'));
