@@ -76,7 +76,7 @@
     - name: Install prom client
       npm:
         name: prom-client
-        global: yes
+        path: "{{ app_dir }}"
         state: present
       become_user: ec2-user
 
